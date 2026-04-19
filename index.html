@@ -1,0 +1,1928 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Thread — a diary that reads back</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,500;0,600;1,400;1,500&family=Caveat:wght@400;500;600;700&family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;1,9..144,400&display=swap">
+<style>
+  * { box-sizing: border-box; -webkit-font-smoothing: antialiased; }
+  html, body { margin: 0; padding: 0; min-height: 100%; }
+  body { font-family: 'Lora', Georgia, serif; }
+  button { font: inherit; color: inherit; }
+  input, textarea { font: inherit; color: inherit; }
+  ::selection { background: rgba(184, 147, 90, 0.35); }
+  /* Keyframes */
+  @keyframes cardRise { to { opacity: 1; transform: translateY(0); } }
+  @keyframes softPulse { 0%,100% { opacity: 0.45; } 50% { opacity: 1; } }
+  @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+  @keyframes fadeInUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+  @keyframes threadDraw { from { stroke-dashoffset: 400; } to { stroke-dashoffset: 0; } }
+  @keyframes growLeaf { from { transform: scale(0.3); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+  @keyframes screenIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+  .screen { animation: screenIn 0.45s cubic-bezier(0.22,0.9,0.3,1); }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script>
+  // Pre-fill API key from ?key= URL param (useful for investor demos)
+  (function() {
+    const p = new URLSearchParams(location.search).get('key');
+    if (p) { localStorage.setItem('thread:gemini_key', p); }
+  })();
+</script>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script type="text/babel">
+// Design tokens & shared primitives for Thread.
+// Everything is exposed on window for cross-file access.
+
+const PALETTES = {
+  cream: {
+    paper:     '#F7F0E1',
+    paperAlt:  '#EFE6D6',
+    paperWarm: '#F2E8D3',
+  },
+  linen: {
+    paper:     '#F3ECDF',
+    paperAlt:  '#E9E0CE',
+    paperWarm: '#EDE3CF',
+  },
+  bone: {
+    paper:     '#F4F1EA',
+    paperAlt:  '#E8E3D7',
+    paperWarm: '#EFEADD',
+  },
+};
+
+const ACCENTS = {
+  kraft: { light: '#C9A97E', deep: '#A88858' },
+  sage:  { light: '#96A97E', deep: '#6F8558' },
+  rose:  { light: '#D4A499', deep: '#B57E72' },
+};
+
+const INK = {
+  deep:  '#3D2E26',
+  soft:  '#6B584C',
+  faint: '#9E8A7A',
+};
+
+const MOOD_COLORS = {
+  calm:       '#96A97E',
+  warm:       '#D4A499',
+  tired:      '#C9A97E',
+  melancholy: '#8A9BA8',
+  joyful:     '#B8935A',
+};
+
+const MOODS = [
+  { id: 'calm',       label: 'calm' },
+  { id: 'warm',       label: 'warm' },
+  { id: 'tired',      label: 'tired' },
+  { id: 'melancholy', label: 'melancholy' },
+  { id: 'joyful',     label: 'joyful' },
+];
+
+const OPENING_PROMPTS = [
+  'What happened today?',
+  "What's lingering in your mind?",
+  'Describe one small moment.',
+  'What did you notice today?',
+  'Write the feeling, not the facts.',
+  'A conversation that stayed with you...',
+  'Something you saw that no one else did.',
+];
+
+// A subtle paper-grain SVG used as the body background.
+const PAPER_GRAIN = `url("data:image/svg+xml,%3Csvg viewBox='0 0 240 240' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.24 0 0 0 0 0.18 0 0 0 0 0.14 0 0 0 0.07 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")`;
+
+// Format a Date as "Sunday, April 19th".
+function formatDate(d) {
+  const dayName = d.toLocaleDateString('en-US', { weekday: 'long' });
+  const monthName = d.toLocaleDateString('en-US', { month: 'long' });
+  const day = d.getDate();
+  const suffix =
+    (day % 10 === 1 && day !== 11) ? 'st' :
+    (day % 10 === 2 && day !== 12) ? 'nd' :
+    (day % 10 === 3 && day !== 13) ? 'rd' : 'th';
+  return `${dayName}, ${monthName} ${day}${suffix}`;
+}
+
+function formatShort(d) {
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+function dateKey(d) {
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+
+Object.assign(window, {
+  PALETTES, ACCENTS, INK, MOODS, MOOD_COLORS,
+  OPENING_PROMPTS, PAPER_GRAIN,
+  formatDate, formatShort, dateKey,
+});
+
+</script>
+<script type="text/babel">
+// Little hand-drawn-feeling SVG icons.
+
+function HandDivider({ color = '#C9A97E', width = 120, style = {} }) {
+  return (
+    <svg width={width} height="8" viewBox="0 0 120 8" fill="none" style={{ display: 'block', margin: '0 auto', ...style }}>
+      <path d="M2 4 Q 20 2, 40 4 T 80 5 T 118 3" stroke={color} strokeWidth="1.2" strokeLinecap="round" fill="none" opacity="0.7" />
+    </svg>
+  );
+}
+
+function SproutIcon({ size = 16, color = '#6F8558' }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 20 20" fill="none">
+      <path d="M10 17 V 10" stroke={color} strokeWidth="1.4" strokeLinecap="round" />
+      <path d="M10 11 Q 5 9, 4 4 Q 8 6, 10 11" stroke={color} strokeWidth="1.2" fill={color} fillOpacity="0.2" strokeLinejoin="round" />
+      <path d="M10 11 Q 15 9, 16 4 Q 12 6, 10 11" stroke={color} strokeWidth="1.2" fill={color} fillOpacity="0.2" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function CalendarIcon({ size = 18, color = '#6B584C' }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 22 22" fill="none">
+      <rect x="3" y="5" width="16" height="14" rx="1.5" stroke={color} strokeWidth="1.3" />
+      <path d="M3 9 H 19" stroke={color} strokeWidth="1.3" />
+      <path d="M7 3 V 6 M 15 3 V 6" stroke={color} strokeWidth="1.3" strokeLinecap="round" />
+      <circle cx="7" cy="13" r="0.8" fill={color} />
+      <circle cx="11" cy="13" r="0.8" fill={color} />
+      <circle cx="15" cy="13" r="0.8" fill={color} />
+    </svg>
+  );
+}
+
+function PenIcon({ size = 18, color = '#6B584C' }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 22 22" fill="none">
+      <path d="M3 19 L 7 18 L 18 7 L 15 4 L 4 15 Z" stroke={color} strokeWidth="1.3" strokeLinejoin="round" fill="none"/>
+      <path d="M13 6 L 16 9" stroke={color} strokeWidth="1.3" strokeLinecap="round"/>
+    </svg>
+  );
+}
+
+function GardenIcon({ size = 18, color = '#6B584C' }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 22 22" fill="none">
+      <path d="M11 19 V 11" stroke={color} strokeWidth="1.3" strokeLinecap="round" />
+      <path d="M11 12 Q 5 10, 4 3 Q 9 6, 11 12" stroke={color} strokeWidth="1.2" fill="none" strokeLinejoin="round" />
+      <path d="M11 12 Q 17 10, 18 3 Q 13 6, 11 12" stroke={color} strokeWidth="1.2" fill="none" strokeLinejoin="round" />
+      <path d="M4 19 H 18" stroke={color} strokeWidth="1.2" strokeLinecap="round" strokeDasharray="1.5 2" />
+    </svg>
+  );
+}
+
+function BookIcon({ size = 14, color = '#A88858' }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none">
+      <path d="M3 3 H 8 V 13 H 3 Z M 8 3 H 13 V 13 H 8 Z" stroke={color} strokeWidth="1.2" strokeLinejoin="round" />
+      <path d="M5 6 H 6.5 M 5 8 H 6.5 M 9.5 6 H 11 M 9.5 8 H 11" stroke={color} strokeWidth="1" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function SettingsIcon({ size = 18, color = '#6B584C' }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 22 22" fill="none">
+      <circle cx="11" cy="11" r="3" stroke={color} strokeWidth="1.3" />
+      <path d="M11 2 V 5 M 11 17 V 20 M 2 11 H 5 M 17 11 H 20 M 4.5 4.5 L 6.5 6.5 M 15.5 15.5 L 17.5 17.5 M 4.5 17.5 L 6.5 15.5 M 15.5 6.5 L 17.5 4.5" stroke={color} strokeWidth="1.3" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function StitchedCorners({ color = '#C9A97E' }) {
+  const stitch = (style) => (
+    <svg style={style} width="10" height="10" viewBox="0 0 10 10">
+      <path d="M1 1 L 9 9 M 1 9 L 9 1" stroke={color} strokeWidth="0.9" strokeLinecap="round" opacity="0.55" />
+    </svg>
+  );
+  return (
+    <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
+      {stitch({ position: 'absolute', top: 6,    left:  6 })}
+      {stitch({ position: 'absolute', top: 6,    right: 6 })}
+      {stitch({ position: 'absolute', bottom: 6, left:  6 })}
+      {stitch({ position: 'absolute', bottom: 6, right: 6 })}
+    </div>
+  );
+}
+
+// Used as the tab-bar "active" underline: a wobbly stitched line
+function StitchUnderline({ color, width = 28 }) {
+  return (
+    <svg width={width} height="4" viewBox={`0 0 ${width} 4`} fill="none" style={{ display: 'block', marginTop: 4 }}>
+      <path d={`M1 2 Q ${width*0.25} 0.5, ${width*0.5} 2 T ${width-1} 1.5`} stroke={color} strokeWidth="1.4" strokeLinecap="round" fill="none" />
+    </svg>
+  );
+}
+
+Object.assign(window, {
+  HandDivider, SproutIcon, CalendarIcon, PenIcon, GardenIcon, BookIcon, SettingsIcon,
+  StitchedCorners, StitchUnderline,
+});
+
+</script>
+<script type="text/babel">
+// Seed data so calendar + garden don't look empty.
+// Dates computed relative to today (April 19, 2026).
+
+const TODAY = new Date();
+function daysAgo(n) {
+  const d = new Date(TODAY);
+  d.setDate(d.getDate() - n);
+  return d;
+}
+
+const SEED_ENTRIES = [
+  {
+    date: daysAgo(1),
+    mood: 'calm',
+    level: 'B2',
+    excerpt: 'A slow Saturday. I made coffee and read on the balcony until the sun moved off the page.',
+  },
+  {
+    date: daysAgo(2),
+    mood: 'joyful',
+    level: 'B2',
+    excerpt: 'Mei called from Osaka. We laughed for an hour about nothing in particular.',
+  },
+  {
+    date: daysAgo(4),
+    mood: 'tired',
+    level: 'B1',
+    excerpt: 'Long day at the office. The meeting went on and on, and I could hardly keep my eyes open.',
+  },
+  {
+    date: daysAgo(5),
+    mood: 'warm',
+    level: 'B2',
+    excerpt: 'Cooked dinner with my brother. Onions, garlic, the good olive oil. The kitchen smelled like home.',
+  },
+  {
+    date: daysAgo(7),
+    mood: 'melancholy',
+    level: 'B2',
+    excerpt: 'The rain did not stop. I kept thinking about the letter I never sent.',
+  },
+  {
+    date: daysAgo(9),
+    mood: 'calm',
+    level: 'B1',
+    excerpt: 'Walked through the park. Everything was quiet in a way that felt earned.',
+  },
+  {
+    date: daysAgo(10),
+    mood: 'joyful',
+    level: 'B2',
+    excerpt: 'Finished the book. I want to start another one tonight, but I also want to sit with this feeling.',
+  },
+  {
+    date: daysAgo(12),
+    mood: 'warm',
+    level: 'B1',
+    excerpt: 'My neighbor brought over a small loaf of bread. I did not know what to say.',
+  },
+  {
+    date: daysAgo(14),
+    mood: 'tired',
+    level: 'B2',
+    excerpt: 'Hardly slept. The city was loud and my mind was louder.',
+  },
+  {
+    date: daysAgo(16),
+    mood: 'calm',
+    level: 'B2',
+    excerpt: 'Slow morning. Long walk. Nothing urgent happened, and that was the point.',
+  },
+  {
+    date: daysAgo(18),
+    mood: 'melancholy',
+    level: 'B2',
+    excerpt: 'I watched the light change on the kitchen wall for a long time before I realized I was crying.',
+  },
+  {
+    date: daysAgo(21),
+    mood: 'warm',
+    level: 'B1',
+    excerpt: 'Taught my mother how to send a voice note. She laughed at her own voice.',
+  },
+];
+
+const SEED_PLANTED = [
+  {
+    word: 'linger',
+    ipa: 'ˈlɪŋ.ɡər',
+    definition: 'to stay somewhere for longer than expected, often because you enjoy it or are reluctant to leave',
+    example: 'The smell of coffee lingered in the kitchen.',
+    plantedAt: daysAgo(2).getTime(),
+  },
+  {
+    word: 'threadbare',
+    ipa: 'ˈθred.ber',
+    definition: 'thin from age or use; (of an idea) overused',
+    example: 'His excuses were getting threadbare.',
+    plantedAt: daysAgo(5).getTime(),
+  },
+  {
+    word: 'earned',
+    ipa: 'ɜːrnd',
+    definition: 'deserved because of effort or experience',
+    example: 'A quiet that felt earned.',
+    plantedAt: daysAgo(9).getTime(),
+  },
+  {
+    word: 'hardly',
+    ipa: 'ˈhɑːrd.li',
+    definition: 'almost not; only just',
+    example: 'I could hardly keep my eyes open.',
+    plantedAt: daysAgo(4).getTime(),
+  },
+  {
+    word: 'sit with (a feeling)',
+    ipa: 'sɪt wɪð',
+    definition: 'to stay with an emotion without rushing past it',
+    example: 'I want to sit with this feeling for a while.',
+    plantedAt: daysAgo(10).getTime(),
+  },
+  {
+    word: 'loaf',
+    ipa: 'loʊf',
+    definition: 'a single portion of bread baked as one piece',
+    example: 'She brought over a small loaf of rye.',
+    plantedAt: daysAgo(12).getTime(),
+  },
+  {
+    word: 'in particular',
+    ipa: 'ɪn pərˈtɪk.jə.lər',
+    definition: 'especially; specifically',
+    example: 'Nothing in particular was wrong.',
+    plantedAt: daysAgo(2).getTime(),
+  },
+];
+
+// Mock feedback the coach returns when window.claude.complete is unavailable
+// or the response can't be parsed.
+function mockFeedback(entry) {
+  const lower = entry.toLowerCase();
+  const mood =
+    /\b(sad|cry|rain|miss|alone)\b/.test(lower)     ? 'melancholy' :
+    /\b(laugh|joy|happy|sun|great|amazing)\b/.test(lower) ? 'joyful' :
+    /\b(tired|exhaust|sleep|long day)\b/.test(lower) ? 'tired'  :
+    /\b(warm|cozy|home|mother|friend|love)\b/.test(lower) ? 'warm'   :
+    'calm';
+
+  return {
+    encouragement: "There's a quiet honesty in how you describe small moments — it pulls the reader in.",
+    grammar: [
+      { original: 'I was went to the park', suggested: 'I went to the park',
+        explanation: "Simple past doesn't need 'was' before the main verb." },
+      { original: 'more better', suggested: 'better',
+        explanation: "'Better' is already comparative — 'more' is unnecessary." },
+      { original: 'a informations', suggested: 'some information',
+        explanation: "'Information' is uncountable in English. Use 'some' or leave the article off." },
+    ],
+    vocabulary: [
+      { word: 'linger', ipa: 'ˈlɪŋ.ɡər',
+        definition: 'to stay somewhere longer than expected, often reluctantly',
+        example: 'The smell of rain lingered into the morning.' },
+      { word: 'earned', ipa: 'ɜːrnd',
+        definition: 'deserved through effort or experience',
+        example: 'A quiet that felt earned.' },
+      { word: 'in particular', ipa: 'ɪn pərˈtɪk.jə.lər',
+        definition: 'especially; specifically',
+        example: 'Nothing in particular was wrong.' },
+      { word: 'settle', ipa: 'ˈsetəl',
+        definition: 'to become quiet or calm; to come to rest',
+        example: 'The dust settled and the room went still.' },
+    ],
+    style: [
+      { original: 'I was very happy today',
+        suggested: 'Today felt good, in a quiet way',
+        note: "More natural and more specific — native speakers often lead with the feeling's texture." },
+      { original: 'I think that maybe',
+        suggested: 'I wonder if',
+        note: "Softer and more common in reflective writing." },
+    ],
+    detected_mood: mood,
+    detected_level: 'B2',
+  };
+}
+
+Object.assign(window, { SEED_ENTRIES, SEED_PLANTED, mockFeedback });
+
+</script>
+<script type="text/babel">
+// Coach: wraps window.claude.complete with a mock fallback.
+
+const COACH_PROMPT = `You are a warm, adaptive English-writing coach for a personal journal. A learner has written a diary entry. Respond with a brief encouragement, then provide corrections adapted to their apparent level.
+
+Rules:
+1. Lead with one genuine, specific thing the user did well (1 short sentence).
+2. Grammar: 2-4 meaningful errors. If none, return an empty list.
+3. Vocabulary: 3-4 useful words the user used or could have used. Include IPA.
+4. Style: 1-3 more-native phrasings. Frame as options, never corrections.
+5. Detect dominant mood: calm, warm, tired, melancholy, or joyful.
+6. Detect level (A2, B1, B2, C1).
+
+Respond with ONLY this JSON (no markdown, no prose):
+{
+  "encouragement": "string (one sentence)",
+  "grammar": [{ "original": "...", "suggested": "...", "explanation": "..." }],
+  "vocabulary": [{ "word": "...", "ipa": "...", "definition": "...", "example": "..." }],
+  "style": [{ "original": "...", "suggested": "...", "note": "..." }],
+  "detected_mood": "calm|warm|tired|melancholy|joyful",
+  "detected_level": "A2|B1|B2|C1"
+}`;
+
+async function geminiComplete(prompt) {
+  const key = localStorage.getItem('thread:gemini_key') || '';
+  if (!key) return null;
+  if (location.protocol === 'file:') {
+    throw new Error('FILE_PROTOCOL');
+  }
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${key}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
+    }
+  );
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err?.error?.message || `HTTP ${res.status}`);
+  }
+  const data = await res.json();
+  return data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+}
+
+async function runCoach(entry) {
+  try {
+    const text = await geminiComplete(
+      `${COACH_PROMPT}\n\n---\n\nDiary entry:\n${entry}\n\n---\n\nReturn only the JSON object.`
+    );
+    if (!text) {
+      await new Promise(r => setTimeout(r, 900));
+      return { ...window.mockFeedback(entry), _source: 'mock' };
+    }
+    const cleaned = String(text).replace(/^```json\s*/i, '').replace(/```\s*$/i, '').trim();
+    return { ...JSON.parse(cleaned), _source: 'gemini' };
+  } catch (e) {
+    console.warn('coach failed:', e.message);
+    const isCorsError = e.message === 'FILE_PROTOCOL' || e.message.includes('fetch');
+    return { ...window.mockFeedback(entry), _source: 'mock', _error: isCorsError ? 'file_protocol' : e.message };
+  }
+}
+
+async function runPhraseGatherer(title) {
+  try {
+    const text = await geminiComplete(
+      `Given the work "${title}", generate 7 signature phrases, vocabulary items, or idioms that capture its register, era, and tone. Prioritize phrases a learner could use in their own diary. Avoid proper nouns specific to the plot.\nReturn ONLY valid JSON: { "phrases": [{ "phrase": "...", "context": "brief note" }] }`
+    );
+    if (!text) {
+      await new Promise(r => setTimeout(r, 700));
+      return [
+        { phrase: 'a quiet stretch of afternoon', context: 'calm pacing' },
+        { phrase: 'what little was left to say', context: 'understated emotion' },
+        { phrase: "keeping one's own counsel", context: 'reserved character' },
+        { phrase: 'the long slow hour before dusk', context: 'atmospheric' },
+        { phrase: 'to make do with what remained', context: 'modest resilience' },
+        { phrase: 'half in a dream', context: 'dreamlike tone' },
+        { phrase: 'a small mercy', context: 'gentle gratitude' },
+      ];
+    }
+    const cleaned = String(text).replace(/^```json\s*/i, '').replace(/```\s*$/i, '').trim();
+    return JSON.parse(cleaned).phrases || [];
+  } catch (e) {
+    return [];
+  }
+}
+
+Object.assign(window, { runCoach, runPhraseGatherer });
+
+</script>
+<script type="text/babel">
+// Nudges: gentle follow-up prompts that surface while writing to help the user
+// keep going. Curated pools by "stage" (blank / short / mid / long) + a fallback
+// async enrichment via window.claude.complete that picks contextually relevant
+// nudges based on what they've written.
+
+const NUDGE_POOLS = {
+  // Shown when the page is empty — warm-ups.
+  blank: [
+    'Start with a color you saw today.',
+    'One sound from this morning — what was it?',
+    'Begin mid-sentence, as if continuing a thought.',
+    'Name the first small thing that surprised you.',
+    'Who did you think about today?',
+    'What did the light look like?',
+    'A smell you noticed, even for a second.',
+  ],
+  // 1–20 words — help the writer expand.
+  short: [
+    'And then what happened?',
+    'Say more about that.',
+    'Where were you when this started?',
+    'What did your body feel like in that moment?',
+    'Was anyone else there?',
+    'Keep going — no need to be careful.',
+    'What would a camera have seen?',
+  ],
+  // 20–80 words — deepen the reflection.
+  mid: [
+    'What did you almost write, but didn\'t?',
+    'Why do you think it stayed with you?',
+    'Is this familiar, or new?',
+    'What would you tell a friend about this?',
+    'Any part of this you\'re avoiding?',
+    'Does this remind you of something older?',
+    'One detail, as specific as possible.',
+  ],
+  // 80+ words — steer toward closing gestures.
+  long: [
+    'If today had a title, what would it be?',
+    'What\'s one sentence you\'d underline?',
+    'What do you want tomorrow to know?',
+    'A small thing you\'re grateful for.',
+    'End on an image, not a conclusion.',
+    'What didn\'t you notice until now?',
+  ],
+};
+
+function stageFor(text) {
+  const n = text.trim() ? text.trim().split(/\s+/).length : 0;
+  if (n === 0)   return 'blank';
+  if (n < 20)    return 'short';
+  if (n < 80)    return 'mid';
+  return 'long';
+}
+
+function pickNudge(text, avoid = []) {
+  const pool = NUDGE_POOLS[stageFor(text)];
+  const available = pool.filter(p => !avoid.includes(p));
+  const list = available.length ? available : pool;
+  return list[Math.floor(Math.random() * list.length)];
+}
+
+// Optional AI-backed contextual nudge. Returns a single short string.
+// Falls back to a pool pick if the helper is unavailable or fails.
+async function contextualNudge(text) {
+  const stage = stageFor(text);
+  if (!window.claude || typeof window.claude.complete !== 'function' || stage === 'blank') {
+    return pickNudge(text);
+  }
+  try {
+    const out = await window.claude.complete(
+      `You are a gentle journaling coach. The writer has this draft so far:
+
+"""
+${text.slice(0, 800)}
+"""
+
+Offer ONE short follow-up question or invitation (max 10 words) that will help them keep writing. Do not moralize. Do not repeat their words verbatim. No quotes, no emojis, no preamble. Just the question.`
+    );
+    const line = String(out || '').trim().replace(/^["'\s]+|["'\s]+$/g, '');
+    if (line && line.length <= 90) return line;
+    return pickNudge(text);
+  } catch {
+    return pickNudge(text);
+  }
+}
+
+Object.assign(window, { NUDGE_POOLS, stageFor, pickNudge, contextualNudge });
+
+</script>
+<script type="text/babel">
+// Writer screen — the main diary composition + feedback view.
+const { useState, useEffect, useMemo, useRef } = React;
+
+function Writer({ theme, onOpenEntry }) {
+  const { paper, paperAlt, paperWarm, accent, accentDeep } = theme;
+  const ink = window.INK;
+
+  const [entry, setEntry] = useState('');
+  const [mood, setMood] = useState(null);
+  const [feedback, setFeedback] = useState(null);
+  const [savedEntry, setSavedEntry] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [planted, setPlanted] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('thread:planted') || '[]'); } catch { return []; }
+  });
+  const [filmOpen, setFilmOpen] = useState(false);
+  const [filmTitle, setFilmTitle] = useState('');
+  const [phrases, setPhrases] = useState([]);
+  const [phrasesLoading, setPhrasesLoading] = useState(false);
+
+  const today = useMemo(() => new Date(), []);
+  const [prompt] = useState(
+    () => window.OPENING_PROMPTS[Math.floor(Math.random() * window.OPENING_PROMPTS.length)]
+  );
+
+  // ── Nudge state ──────────────────────────────
+  const [nudge, setNudge] = useState(null);       // current nudge string or null
+  const [nudgeHistory, setNudgeHistory] = useState([]);
+  const [nudgeDismissed, setNudgeDismissed] = useState(false);
+  const [idleTick, setIdleTick] = useState(0);
+  const lastTypedRef = useRef(Date.now());
+  const lastStageRef = useRef('blank');
+
+  // Track typing pauses
+  useEffect(() => {
+    lastTypedRef.current = Date.now();
+    setNudgeDismissed(false); // typing = user wants help again if idle comes back
+  }, [entry]);
+
+  // Idle tick — fires every 1.2s to check if user has paused
+  useEffect(() => {
+    if (hasFeedback) return;
+    const id = setInterval(() => setIdleTick(t => t + 1), 1200);
+    return () => clearInterval(id);
+  }, [hasFeedback]);
+
+  // Decide when to show a nudge
+  useEffect(() => {
+    if (hasFeedback || nudgeDismissed) return;
+    const idleMs = Date.now() - lastTypedRef.current;
+    const stage = window.stageFor(entry);
+    const stageChanged = stage !== lastStageRef.current;
+
+    // Trigger: either stage changed (crossed 20/80-word threshold) OR user idle >6s
+    if (!nudge && (stageChanged || idleMs > 6000)) {
+      lastStageRef.current = stage;
+      const pick = window.pickNudge(entry, nudgeHistory);
+      setNudge(pick);
+      setNudgeHistory(h => [...h.slice(-4), pick]);
+    }
+  }, [idleTick, entry, hasFeedback, nudge, nudgeDismissed, nudgeHistory]);
+
+  const refreshNudge = async () => {
+    // Try for an AI-backed contextual nudge if user has written something
+    setNudge('__loading__');
+    const next = entry.trim().split(/\s+/).length > 8
+      ? await window.contextualNudge(entry)
+      : window.pickNudge(entry, nudgeHistory);
+    setNudge(next);
+    setNudgeHistory(h => [...h.slice(-4), next]);
+  };
+
+  const dismissNudge = () => {
+    setNudge(null);
+    setNudgeDismissed(true);
+  };
+
+  const hasFeedback = feedback && savedEntry;
+
+  const wordCount = entry.trim() ? entry.trim().split(/\s+/).length : 0;
+
+  const handleSave = async () => {
+    if (!entry.trim()) return;
+    setLoading(true);
+    try {
+      const parsed = await window.runCoach(entry);
+      setFeedback(parsed);
+      setSavedEntry(entry);
+      if (!mood && parsed.detected_mood) setMood(parsed.detected_mood);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handlePlant = (item) => {
+    if (planted.find(p => p.word === item.word)) return;
+    const next = [...planted, { ...item, plantedAt: Date.now() }];
+    setPlanted(next);
+    localStorage.setItem('thread:planted', JSON.stringify(next));
+  };
+
+  const plantedWords = planted.map(p => p.word);
+
+  const handleNew = () => {
+    setEntry(''); setMood(null); setFeedback(null); setSavedEntry(null);
+  };
+
+  const handleGenerate = async () => {
+    if (!filmTitle.trim()) return;
+    setPhrasesLoading(true);
+    try {
+      const result = await window.runPhraseGatherer(filmTitle);
+      setPhrases(result);
+    } finally {
+      setPhrasesLoading(false);
+    }
+  };
+
+  return (
+    <div className="screen" data-screen-label="01 Write">
+      {/* Date */}
+      <div style={{ textAlign: 'center', marginBottom: 8 }}>
+        <div style={{ fontFamily: "'Caveat', cursive", fontSize: 26, color: ink.soft, letterSpacing: '0.01em' }}>
+          {window.formatDate(today)}
+        </div>
+      </div>
+      <div style={{ marginBottom: 28 }}>
+        <window.HandDivider color={accent} width={140} />
+      </div>
+
+      {/* inspired-by pill */}
+      {!hasFeedback && !filmOpen && (
+        <div style={{ textAlign: 'right', marginBottom: 14 }}>
+          <button
+            onClick={() => setFilmOpen(true)}
+            style={{
+              fontFamily: "'Caveat', cursive", fontSize: 18, color: accentDeep,
+              background: 'transparent', border: `1px dashed ${accent}`,
+              borderRadius: 20, padding: '4px 14px', cursor: 'pointer',
+              display: 'inline-flex', alignItems: 'center', gap: 6,
+            }}>
+            <window.BookIcon size={13} color={accentDeep} />
+            inspired by…
+          </button>
+        </div>
+      )}
+
+      {filmOpen && !hasFeedback && (
+        <FilmBookPanel
+          theme={theme}
+          title={filmTitle} setTitle={setFilmTitle}
+          phrases={phrases} loading={phrasesLoading}
+          onGenerate={handleGenerate}
+          onClose={() => setFilmOpen(false)}
+        />
+      )}
+
+      {!hasFeedback ? (
+        <>
+          <div style={{ position: 'relative' }}>
+            <textarea
+              className="thread-textarea"
+              value={entry}
+              onChange={(e) => setEntry(e.target.value)}
+              placeholder={prompt}
+              disabled={loading}
+              style={{
+                width: '100%', minHeight: 300,
+                background: 'transparent', border: 'none', outline: 'none', resize: 'none',
+                fontFamily: "'Lora', Georgia, serif", fontSize: 18, lineHeight: 1.8,
+                color: ink.deep, padding: '8px 4px',
+              }}
+            />
+          </div>
+          <NudgeBubble
+            nudge={nudge}
+            theme={theme}
+            onDismiss={dismissNudge}
+            onRefresh={refreshNudge}
+          />
+          <style>{`
+            .thread-textarea::placeholder { color: ${ink.faint}; font-style: italic; opacity: 0.75; }
+          `}</style>
+
+          {/* word count */}
+          <div style={{ textAlign: 'right', fontFamily: "'Caveat', cursive", fontSize: 16, color: ink.faint, marginTop: 4 }}>
+            {wordCount > 0 && `${wordCount} word${wordCount === 1 ? '' : 's'}`}
+          </div>
+
+          {/* mood strip */}
+          <div style={{ marginTop: 30, textAlign: 'center' }}>
+            <div style={{ fontFamily: "'Caveat', cursive", fontSize: 17, color: ink.soft, marginBottom: 12 }}>
+              how do you feel today?
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'center', gap: 24, alignItems: 'flex-start' }}>
+              {window.MOODS.map(m => {
+                const selected = mood === m.id;
+                const color = window.MOOD_COLORS[m.id];
+                return (
+                  <button key={m.id} onClick={() => setMood(m.id)}
+                    style={{
+                      background: 'transparent', border: 'none', cursor: 'pointer',
+                      display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, padding: 4,
+                      opacity: mood && !selected ? 0.4 : 1, transition: 'opacity 0.3s',
+                    }}>
+                    <div style={{
+                      width: selected ? 22 : 16, height: selected ? 22 : 16, borderRadius: '50%',
+                      background: color,
+                      border: selected ? `2px solid ${ink.deep}` : `1px solid ${ink.faint}`,
+                      boxShadow: selected ? `0 0 0 3px ${color}33` : 'none',
+                      transition: 'all 0.25s',
+                    }}/>
+                    <span style={{ fontFamily: "'Caveat', cursive", fontSize: 14, color: selected ? ink.deep : ink.faint }}>
+                      {m.label}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div style={{ marginTop: 36, textAlign: 'center' }}>
+            <button
+              onClick={handleSave}
+              disabled={loading || !entry.trim()}
+              style={{
+                fontFamily: "'Lora', serif", fontStyle: 'italic', fontSize: 17,
+                color: entry.trim() && !loading ? ink.deep : ink.faint,
+                background: 'transparent', border: 'none',
+                cursor: entry.trim() && !loading ? 'pointer' : 'default',
+                padding: '8px 24px', letterSpacing: '0.02em',
+              }}>
+              {loading
+                ? <span style={{ animation: 'softPulse 1.6s ease-in-out infinite' }}>the coach is reading…</span>
+                : <>save &amp; reflect <span style={{ marginLeft: 6, color: accentDeep }}>→</span></>
+              }
+            </button>
+            {loading && <div style={{ marginTop: 12 }}><window.HandDivider width={80} color={accent} /></div>}
+          </div>
+        </>
+      ) : (
+        <FeedbackView
+          theme={theme}
+          entry={savedEntry} mood={mood} feedback={feedback}
+          planted={plantedWords} onPlant={handlePlant}
+          onNew={handleNew}
+        />
+      )}
+    </div>
+  );
+}
+
+function FilmBookPanel({ theme, title, setTitle, phrases, loading, onGenerate, onClose }) {
+  const { paperWarm, accent, accentDeep, paper } = theme;
+  const ink = window.INK;
+  return (
+    <div style={{
+      position: 'relative', background: paperWarm,
+      border: `1.5px dashed ${accent}`, borderRadius: 3,
+      padding: '20px 22px', marginBottom: 24,
+      boxShadow: '0 2px 14px rgba(61,46,38,0.07)',
+      animation: 'fadeInUp 0.35s ease-out',
+    }}>
+      <window.StitchedCorners color={accent} />
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <window.BookIcon size={16} color={accentDeep} />
+          <span style={{ fontFamily: "'Caveat', cursive", fontSize: 20, color: accentDeep }}>Inspired by…</span>
+        </div>
+        <button onClick={onClose} style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: ink.faint, fontSize: 16 }}>✕</button>
+      </div>
+      <div style={{ display: 'flex', gap: 8 }}>
+        <input
+          value={title} onChange={(e) => setTitle(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && title.trim() && onGenerate()}
+          placeholder="a book, a film, an author…"
+          style={{
+            flex: 1, fontFamily: "'Lora', serif", fontSize: 15, padding: '8px 12px',
+            background: paper, border: `1px solid ${accent}`, borderRadius: 2,
+            color: ink.deep, outline: 'none',
+          }} />
+        <button onClick={onGenerate} disabled={loading || !title.trim()}
+          style={{
+            fontFamily: "'Lora', serif", fontSize: 14, padding: '8px 16px',
+            background: accentDeep, color: paper, border: 'none', borderRadius: 2,
+            cursor: (loading || !title.trim()) ? 'default' : 'pointer',
+            opacity: (loading || !title.trim()) ? 0.6 : 1, letterSpacing: '0.02em',
+          }}>
+          {loading ? 'gathering…' : 'gather phrases'}
+        </button>
+      </div>
+      {phrases.length > 0 && (
+        <div style={{ marginTop: 16, display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+          {phrases.map((p, i) => (
+            <div key={i} title={p.context || ''}
+              style={{
+                fontFamily: "'Lora', serif", fontSize: 13.5, fontStyle: 'italic',
+                padding: '6px 12px', background: paper,
+                border: `1px dashed ${accent}`, borderRadius: 2, color: ink.deep,
+                animation: `fadeInUp 0.4s ease-out ${i * 60}ms backwards`,
+              }}>
+              {p.phrase}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function FeedbackView({ theme, entry, mood, feedback, planted, onPlant, onNew }) {
+  const { accent, accentDeep } = theme;
+  const ink = window.INK;
+  const isFileProtocol = feedback._error === 'file_protocol';
+  const isMock = feedback._source === 'mock';
+  return (
+    <>
+      {isMock && (
+        <div style={{
+          background: '#FFF3CD', border: '1px dashed #C9A97E', borderRadius: 3,
+          padding: '10px 14px', marginBottom: 20,
+          fontFamily: "'Lora', serif", fontSize: 13.5, lineHeight: 1.55, color: '#6B584C',
+        }}>
+          {isFileProtocol ? (
+            <>
+              <strong>Открыт как file://</strong> — браузер блокирует запросы к API.{' '}
+              Запустите <code style={{ background: '#F2E8D3', padding: '1px 4px', borderRadius: 2 }}>start_thread.bat</code>{' '}
+              из папки Downloads, чтобы открыть через локальный сервер.
+            </>
+          ) : !localStorage.getItem('thread:gemini_key') ? (
+            <>Ключ не введён — показан демо-анализ. Нажмите ⚙️ и добавьте Gemini API key.</>
+          ) : (
+            <>Gemini не ответил ({feedback._error}) — показан демо-анализ.</>
+          )}
+        </div>
+      )}
+      <div style={{
+        fontFamily: "'Lora', Georgia, serif", fontSize: 18, lineHeight: 1.8,
+        color: ink.soft, whiteSpace: 'pre-wrap',
+        padding: '8px 4px', marginBottom: 24,
+        animation: 'fadeIn 0.5s ease-out',
+      }}>
+        {entry}
+      </div>
+
+      {mood && (
+        <div style={{ textAlign: 'center', marginBottom: 28 }}>
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+            <div style={{ width: 12, height: 12, borderRadius: '50%', background: window.MOOD_COLORS[mood] }}/>
+            <span style={{ fontFamily: "'Caveat', cursive", fontSize: 17, color: ink.soft }}>{mood}</span>
+          </div>
+        </div>
+      )}
+
+      <div style={{ textAlign: 'center', marginBottom: 18 }}>
+        <div style={{ fontFamily: "'Caveat', cursive", fontSize: 22, color: accentDeep }}>
+          ~ a few thoughts on your writing ~
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+        <FeedbackCard accent="#96A97E" accentDeep="#6F8558" icon="grammar" title="A few gentle edits" delay={0}>
+          {feedback.encouragement && (
+            <p style={{ fontFamily: "'Caveat', cursive", fontSize: 18, color: '#6F8558', marginBottom: 14, lineHeight: 1.3 }}>
+              {feedback.encouragement}
+            </p>
+          )}
+          {(feedback.grammar || []).length === 0 ? (
+            <p style={{ fontFamily: "'Lora', serif", fontStyle: 'italic', color: ink.soft, fontSize: 14 }}>
+              Nothing to correct today — your writing is clean.
+            </p>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              {feedback.grammar.map((item, i) => (
+                <div key={i} style={{ borderLeft: '2px solid #96A97E', paddingLeft: 12 }}>
+                  <div style={{ fontFamily: "'Lora', serif", fontSize: 14.5, lineHeight: 1.55, color: ink.deep }}>
+                    <span style={{ textDecoration: 'line-through', color: ink.faint }}>{item.original}</span>
+                    <span style={{ margin: '0 8px', color: accentDeep }}>→</span>
+                    <span style={{ color: '#6F8558', fontWeight: 500 }}>{item.suggested}</span>
+                  </div>
+                  {item.explanation && (
+                    <div style={{ fontFamily: "'Lora', serif", fontSize: 13, fontStyle: 'italic', color: ink.soft, marginTop: 4, lineHeight: 1.5 }}>
+                      {item.explanation}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </FeedbackCard>
+
+        <FeedbackCard accent="#D4A499" accentDeep="#B57E72" icon="vocab" title="Words worth keeping" delay={150}>
+          {(feedback.vocabulary || []).length === 0 ? (
+            <p style={{ fontFamily: "'Lora', serif", fontStyle: 'italic', color: ink.soft, fontSize: 14 }}>
+              No new vocabulary to surface this time.
+            </p>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              {feedback.vocabulary.map((item, i) => {
+                const isPlanted = planted.includes(item.word);
+                return (
+                  <div key={i}>
+                    <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
+                      <span style={{ fontFamily: "'Lora', serif", fontSize: 17, fontWeight: 600, color: ink.deep }}>
+                        {item.word}
+                      </span>
+                      {item.ipa && (
+                        <span style={{ fontFamily: "'Lora', serif", fontSize: 13, fontStyle: 'italic', color: ink.faint }}>
+                          /{item.ipa}/
+                        </span>
+                      )}
+                    </div>
+                    <div style={{ fontFamily: "'Lora', serif", fontSize: 14, color: ink.soft, marginTop: 3, lineHeight: 1.55 }}>
+                      {item.definition}
+                    </div>
+                    {item.example && (
+                      <div style={{ fontFamily: "'Lora', serif", fontSize: 13.5, fontStyle: 'italic', color: ink.soft, marginTop: 4, lineHeight: 1.55, paddingLeft: 10, borderLeft: '1.5px dotted #D4A499' }}>
+                        "{item.example}"
+                      </div>
+                    )}
+                    <button onClick={() => onPlant(item)} disabled={isPlanted}
+                      style={{
+                        marginTop: 8, fontFamily: "'Caveat', cursive", fontSize: 16,
+                        color: isPlanted ? '#6F8558' : '#B57E72',
+                        background: 'transparent', border: 'none',
+                        cursor: isPlanted ? 'default' : 'pointer',
+                        padding: 0, display: 'inline-flex', alignItems: 'center', gap: 6,
+                        opacity: isPlanted ? 0.7 : 1,
+                      }}>
+                      <window.SproutIcon size={14} color={isPlanted ? '#6F8558' : '#B57E72'} />
+                      {isPlanted ? 'planted in your garden' : 'plant in garden'}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </FeedbackCard>
+
+        <FeedbackCard accent="#C9A97E" accentDeep="#A88858" icon="style" title="A more native shade" delay={300}>
+          {(feedback.style || []).length === 0 ? (
+            <p style={{ fontFamily: "'Lora', serif", fontStyle: 'italic', color: ink.soft, fontSize: 14 }}>
+              Your voice already feels natural here.
+            </p>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              {feedback.style.map((item, i) => (
+                <div key={i}>
+                  <div style={{ fontFamily: "'Lora', serif", fontSize: 14.5, color: ink.soft, lineHeight: 1.55 }}>
+                    You wrote <span style={{ fontStyle: 'italic', color: ink.deep }}>"{item.original}"</span>
+                  </div>
+                  <div style={{ fontFamily: "'Lora', serif", fontSize: 14.5, color: ink.deep, lineHeight: 1.55, marginTop: 3 }}>
+                    A native speaker might say <span style={{ color: '#A88858', fontWeight: 500 }}>"{item.suggested}"</span>
+                  </div>
+                  {item.note && (
+                    <div style={{ fontFamily: "'Lora', serif", fontSize: 13, fontStyle: 'italic', color: ink.faint, marginTop: 4, lineHeight: 1.5 }}>
+                      {item.note}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </FeedbackCard>
+      </div>
+
+      {feedback.detected_level && (
+        <div style={{ textAlign: 'center', marginTop: 28 }}>
+          <span style={{ fontFamily: "'Caveat', cursive", fontSize: 15, color: ink.faint }}>
+            writing at level {feedback.detected_level}
+          </span>
+        </div>
+      )}
+
+      <div style={{ textAlign: 'center', marginTop: 40 }}>
+        <button onClick={onNew}
+          style={{
+            fontFamily: "'Lora', serif", fontStyle: 'italic', fontSize: 15,
+            color: ink.soft, background: 'transparent',
+            border: `1px dashed ${accent}`, borderRadius: 20, padding: '6px 18px',
+            cursor: 'pointer', letterSpacing: '0.02em',
+          }}>
+          begin a new page
+        </button>
+      </div>
+    </>
+  );
+}
+
+function FeedbackCard({ accent, accentDeep, icon, title, children, delay }) {
+  const ink = window.INK;
+  return (
+    <div style={{
+      position: 'relative', background: '#F7F0E1',
+      border: `1.5px dashed ${accent}`, borderRadius: 3,
+      padding: '22px 24px 24px',
+      boxShadow: '0 2px 14px rgba(61, 46, 38, 0.07), inset 0 0 0 1px rgba(255,255,255,0.6)',
+      opacity: 0, transform: 'translateY(14px)',
+      animation: `cardRise 0.7s cubic-bezier(0.22, 0.9, 0.3, 1) ${delay}ms forwards`,
+    }}>
+      <window.StitchedCorners color={accent} />
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+        {icon === 'grammar' && (
+          <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
+            <path d="M3 18 L 11 3 L 19 18" stroke={accentDeep} strokeWidth="1.3" strokeLinejoin="round" />
+            <path d="M6.5 12 H 15.5" stroke={accentDeep} strokeWidth="1.3" strokeLinecap="round" />
+          </svg>
+        )}
+        {icon === 'vocab' && (
+          <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
+            <path d="M4 4 H 10 V 18 H 4 Z M 10 4 H 18 V 18 H 10 Z" stroke={accentDeep} strokeWidth="1.3" strokeLinejoin="round" />
+            <path d="M6 8 H 8.5 M 6 11 H 8.5 M 12 8 H 16 M 12 11 H 16 M 12 14 H 14" stroke={accentDeep} strokeWidth="1" strokeLinecap="round" />
+          </svg>
+        )}
+        {icon === 'style' && (
+          <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
+            <path d="M11 3 L 13 9 L 19 10 L 14.5 14 L 16 20 L 11 17 L 6 20 L 7.5 14 L 3 10 L 9 9 Z" stroke={accentDeep} strokeWidth="1.2" strokeLinejoin="round" fill="none" />
+          </svg>
+        )}
+        <h3 style={{ fontFamily: "'Lora', serif", fontSize: 17, fontWeight: 500, color: ink.deep, margin: 0, letterSpacing: '0.01em' }}>
+          {title}
+        </h3>
+      </div>
+      {children}
+    </div>
+  );
+}
+
+Object.assign(window, { Writer });
+
+// ──────────────────────────────────────────────
+// NudgeBubble — a small, dismissible prompt card that floats beside the textarea
+// ──────────────────────────────────────────────
+function NudgeBubble({ nudge, theme, onDismiss, onRefresh }) {
+  const ink = window.INK;
+  const { accent, accentDeep, paperWarm, paper } = theme;
+  if (!nudge) return null;
+  const loading = nudge === '__loading__';
+  return (
+    <div
+      key={nudge}
+      style={{
+        marginTop: 14,
+        maxWidth: 340,
+        background: paperWarm,
+        border: `1.5px dashed ${accent}`,
+        borderRadius: 3,
+        padding: '12px 14px 12px 16px',
+        boxShadow: '0 6px 20px rgba(61,46,38,0.10)',
+        animation: 'fadeInUp 0.45s cubic-bezier(0.22,0.9,0.3,1)',
+        position: 'relative',
+      }}>
+      <window.StitchedCorners color={accent} />
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+        <div style={{ flex: 1 }}>
+          <div style={{
+            fontFamily: "'Caveat', cursive", fontSize: 13,
+            color: accentDeep, letterSpacing: '0.04em',
+            textTransform: 'uppercase', marginBottom: 2, opacity: 0.85,
+          }}>
+            a nudge
+          </div>
+          <div style={{
+            fontFamily: "'Lora', serif", fontStyle: 'italic',
+            fontSize: 15, lineHeight: 1.45, color: ink.deep,
+            minHeight: 22,
+          }}>
+            {loading
+              ? <span style={{ animation: 'softPulse 1.4s ease-in-out infinite', color: ink.faint }}>thinking…</span>
+              : nudge}
+          </div>
+          {!loading && (
+            <div style={{ display: 'flex', gap: 12, marginTop: 8, alignItems: 'center' }}>
+              <button onClick={onRefresh}
+                style={{
+                  fontFamily: "'Caveat', cursive", fontSize: 15,
+                  color: accentDeep, background: 'transparent', border: 'none',
+                  padding: 0, cursor: 'pointer',
+                }}>
+                another ↻
+              </button>
+              <span style={{ color: ink.faint, opacity: 0.4 }}>·</span>
+              <button onClick={onDismiss}
+                style={{
+                  fontFamily: "'Caveat', cursive", fontSize: 15,
+                  color: ink.faint, background: 'transparent', border: 'none',
+                  padding: 0, cursor: 'pointer',
+                }}>
+                not now
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+</script>
+<script type="text/babel">
+// Calendar screen — a monthly mood map + list of recent entries.
+
+function CalendarScreen({ theme, entries, onOpenEntry }) {
+  const { accent, accentDeep, paper, paperWarm } = theme;
+  const ink = window.INK;
+  const today = new Date();
+  const year  = today.getFullYear();
+  const month = today.getMonth();
+  const first = new Date(year, month, 1);
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const leading = first.getDay(); // Sun=0
+
+  const byKey = React.useMemo(() => {
+    const m = new Map();
+    entries.forEach(e => m.set(window.dateKey(e.date), e));
+    return m;
+  }, [entries]);
+
+  const monthLabel = today.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+
+  const recent = [...entries].sort((a,b) => b.date - a.date).slice(0, 6);
+
+  return (
+    <div className="screen" data-screen-label="02 Calendar">
+      <div style={{ textAlign: 'center', marginBottom: 8 }}>
+        <div style={{ fontFamily: "'Caveat', cursive", fontSize: 28, color: ink.deep }}>
+          {monthLabel}
+        </div>
+      </div>
+      <div style={{ marginBottom: 24 }}>
+        <window.HandDivider color={accent} width={140} />
+      </div>
+
+      {/* Calendar grid */}
+      <div style={{
+        background: paperWarm, border: `1.5px dashed ${accent}`, borderRadius: 3,
+        padding: '22px 22px 18px', position: 'relative',
+        boxShadow: '0 2px 14px rgba(61,46,38,0.06)',
+      }}>
+        <window.StitchedCorners color={accent} />
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7,1fr)', gap: 4, marginBottom: 10 }}>
+          {['S','M','T','W','T','F','S'].map((d,i) => (
+            <div key={i} style={{ fontFamily: "'Caveat', cursive", fontSize: 14, color: ink.faint, textAlign: 'center' }}>
+              {d}
+            </div>
+          ))}
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7,1fr)', gap: 4 }}>
+          {Array.from({ length: leading }).map((_, i) => <div key={`b${i}`} />)}
+          {Array.from({ length: daysInMonth }).map((_, idx) => {
+            const day = idx + 1;
+            const d = new Date(year, month, day);
+            const k = window.dateKey(d);
+            const e = byKey.get(k);
+            const isToday = day === today.getDate();
+            const hasEntry = !!e;
+            return (
+              <button key={day}
+                onClick={() => hasEntry && onOpenEntry(e)}
+                disabled={!hasEntry}
+                title={hasEntry ? e.excerpt : ''}
+                style={{
+                  aspectRatio: '1',
+                  position: 'relative',
+                  background: hasEntry ? paper : 'transparent',
+                  border: isToday ? `1.5px solid ${accentDeep}` : `1px solid ${hasEntry ? accent : 'transparent'}`,
+                  borderRadius: 2,
+                  cursor: hasEntry ? 'pointer' : 'default',
+                  padding: 4,
+                  display: 'flex', flexDirection: 'column',
+                  alignItems: 'center', justifyContent: 'center', gap: 3,
+                  transition: 'transform 0.15s',
+                }}
+                onMouseEnter={e2 => hasEntry && (e2.currentTarget.style.transform = 'translateY(-1px)')}
+                onMouseLeave={e2 => (e2.currentTarget.style.transform = 'translateY(0)')}
+              >
+                <span style={{
+                  fontFamily: "'Lora', serif",
+                  fontSize: 13,
+                  color: isToday ? accentDeep : (hasEntry ? ink.deep : ink.faint),
+                  fontWeight: isToday ? 600 : 400,
+                }}>
+                  {day}
+                </span>
+                {hasEntry && (
+                  <div style={{
+                    width: 8, height: 8, borderRadius: '50%',
+                    background: window.MOOD_COLORS[e.mood],
+                  }}/>
+                )}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Mood legend */}
+        <div style={{
+          marginTop: 18, paddingTop: 14, borderTop: `1px dashed ${accent}`,
+          display: 'flex', flexWrap: 'wrap', gap: 14, justifyContent: 'center',
+        }}>
+          {window.MOODS.map(m => (
+            <div key={m.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+              <div style={{ width: 8, height: 8, borderRadius: '50%', background: window.MOOD_COLORS[m.id] }}/>
+              <span style={{ fontFamily: "'Caveat', cursive", fontSize: 14, color: ink.soft }}>{m.label}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Recent list */}
+      <div style={{ marginTop: 32 }}>
+        <div style={{ fontFamily: "'Caveat', cursive", fontSize: 20, color: ink.deep, marginBottom: 12 }}>
+          Recent pages
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+          {recent.map((e, i) => (
+            <button key={i} onClick={() => onOpenEntry(e)}
+              style={{
+                textAlign: 'left', background: 'transparent', border: 'none',
+                padding: '14px 4px', cursor: 'pointer',
+                borderBottom: i === recent.length - 1 ? 'none' : `1px dotted ${accent}`,
+                display: 'flex', gap: 14, alignItems: 'flex-start',
+              }}>
+              <div style={{ flexShrink: 0, paddingTop: 4 }}>
+                <div style={{ width: 10, height: 10, borderRadius: '50%', background: window.MOOD_COLORS[e.mood] }}/>
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{
+                  fontFamily: "'Caveat', cursive", fontSize: 17, color: ink.soft,
+                  marginBottom: 2,
+                }}>
+                  {window.formatDate(e.date)}
+                </div>
+                <div style={{
+                  fontFamily: "'Lora', serif", fontSize: 14.5, color: ink.deep,
+                  lineHeight: 1.55,
+                  overflow: 'hidden', textOverflow: 'ellipsis',
+                  display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
+                }}>
+                  {e.excerpt}
+                </div>
+              </div>
+              <div style={{ fontFamily: "'Caveat', cursive", fontSize: 13, color: ink.faint, flexShrink: 0 }}>
+                {e.level}
+              </div>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Simple entry reader modal handled by parent via onOpenEntry */}
+    </div>
+  );
+}
+
+Object.assign(window, { CalendarScreen });
+
+</script>
+<script type="text/babel">
+// Garden screen — planted vocabulary words, arranged as "plots".
+
+function GardenScreen({ theme, planted }) {
+  const { accent, accentDeep, paper, paperWarm } = theme;
+  const ink = window.INK;
+  const [selected, setSelected] = React.useState(null);
+
+  // Sort by plantedAt desc
+  const sorted = [...planted].sort((a,b) => (b.plantedAt || 0) - (a.plantedAt || 0));
+
+  return (
+    <div className="screen" data-screen-label="03 Garden">
+      <div style={{ textAlign: 'center', marginBottom: 6 }}>
+        <div style={{ fontFamily: "'Caveat', cursive", fontSize: 28, color: ink.deep }}>
+          Your vocabulary garden
+        </div>
+        <div style={{ fontFamily: "'Lora', serif", fontStyle: 'italic', fontSize: 14.5, color: ink.soft, marginTop: 4 }}>
+          {sorted.length} {sorted.length === 1 ? 'word' : 'words'} planted — tap any sprout to revisit it
+        </div>
+      </div>
+      <div style={{ marginBottom: 28 }}>
+        <window.HandDivider color={accent} width={140} />
+      </div>
+
+      {sorted.length === 0 ? (
+        <EmptyGarden theme={theme} />
+      ) : (
+        <div style={{
+          background: paperWarm, border: `1.5px dashed ${accent}`, borderRadius: 3,
+          padding: '26px 22px 28px', position: 'relative',
+          boxShadow: '0 2px 14px rgba(61,46,38,0.06)',
+        }}>
+          <window.StitchedCorners color={accent} />
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))',
+            gap: 20,
+          }}>
+            {sorted.map((w, i) => (
+              <GardenSprout key={w.word} word={w} delay={i * 70}
+                onClick={() => setSelected(w)} />
+            ))}
+          </div>
+          {/* Dashed soil line */}
+          <div style={{
+            marginTop: 24, paddingTop: 16,
+            borderTop: `1px dashed ${accent}`,
+            textAlign: 'center',
+            fontFamily: "'Caveat', cursive", fontSize: 16, color: ink.faint,
+          }}>
+            ~ new words take root the more you use them ~
+          </div>
+        </div>
+      )}
+
+      {selected && <WordModal word={selected} theme={theme} onClose={() => setSelected(null)} />}
+    </div>
+  );
+}
+
+function GardenSprout({ word, delay, onClick }) {
+  const ink = window.INK;
+  return (
+    <button onClick={onClick}
+      style={{
+        background: 'transparent', border: 'none', cursor: 'pointer',
+        padding: '12px 8px 10px', textAlign: 'center',
+        display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8,
+        animation: `growLeaf 0.6s cubic-bezier(0.22,0.9,0.3,1) ${delay}ms backwards`,
+        transition: 'transform 0.2s',
+      }}
+      onMouseEnter={e => e.currentTarget.style.transform = 'translateY(-3px)'}
+      onMouseLeave={e => e.currentTarget.style.transform = 'translateY(0)'}>
+      <SproutLarge />
+      <div style={{ fontFamily: "'Lora', serif", fontSize: 15, color: ink.deep, fontWeight: 500 }}>
+        {word.word}
+      </div>
+      {word.ipa && (
+        <div style={{ fontFamily: "'Lora', serif", fontSize: 11.5, fontStyle: 'italic', color: ink.faint }}>
+          /{word.ipa}/
+        </div>
+      )}
+    </button>
+  );
+}
+
+function SproutLarge() {
+  // Slightly varied sprout — uses a deterministic tilt so each feels hand-placed
+  const tilt = ((Math.random() * 14) - 7).toFixed(1);
+  return (
+    <svg width="46" height="46" viewBox="0 0 46 46" fill="none"
+      style={{ transform: `rotate(${tilt}deg)` }}>
+      {/* stem */}
+      <path d="M23 42 V 22" stroke="#6F8558" strokeWidth="1.6" strokeLinecap="round" />
+      {/* left leaf */}
+      <path d="M23 26 Q 12 22, 10 10 Q 20 14, 23 26 Z" fill="#96A97E" fillOpacity="0.35" stroke="#6F8558" strokeWidth="1.2" strokeLinejoin="round" />
+      {/* right leaf */}
+      <path d="M23 23 Q 34 19, 36 7 Q 26 11, 23 23 Z" fill="#96A97E" fillOpacity="0.35" stroke="#6F8558" strokeWidth="1.2" strokeLinejoin="round" />
+      {/* bud */}
+      <circle cx="23" cy="22" r="1.4" fill="#B57E72" />
+    </svg>
+  );
+}
+
+function WordModal({ word, theme, onClose }) {
+  const { paper, paperWarm, accent, accentDeep } = theme;
+  const ink = window.INK;
+  return (
+    <div onClick={onClose}
+      style={{
+        position: 'fixed', inset: 0, background: 'rgba(61,46,38,0.25)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        padding: 24, zIndex: 50, animation: 'fadeIn 0.2s ease-out',
+      }}>
+      <div onClick={e => e.stopPropagation()}
+        style={{
+          background: paper, border: `1.5px dashed ${accent}`, borderRadius: 3,
+          padding: '28px 28px 26px', maxWidth: 420, width: '100%',
+          position: 'relative', boxShadow: '0 10px 40px rgba(61,46,38,0.2)',
+          animation: 'fadeInUp 0.28s ease-out',
+        }}>
+        <window.StitchedCorners color={accent} />
+        <button onClick={onClose}
+          style={{
+            position: 'absolute', top: 12, right: 14,
+            background: 'transparent', border: 'none', cursor: 'pointer',
+            color: ink.faint, fontSize: 18,
+          }}>✕</button>
+
+        <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 12 }}>
+          <SproutLarge />
+        </div>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ fontFamily: "'Lora', serif", fontSize: 24, fontWeight: 600, color: ink.deep }}>
+            {word.word}
+          </div>
+          {word.ipa && (
+            <div style={{ fontFamily: "'Lora', serif", fontSize: 14, fontStyle: 'italic', color: ink.faint, marginTop: 3 }}>
+              /{word.ipa}/
+            </div>
+          )}
+        </div>
+        <div style={{ marginTop: 16 }}>
+          <window.HandDivider color={accent} width={80} />
+        </div>
+        <div style={{ marginTop: 14, fontFamily: "'Lora', serif", fontSize: 15, color: ink.soft, lineHeight: 1.6, textAlign: 'center' }}>
+          {word.definition}
+        </div>
+        {word.example && (
+          <div style={{
+            marginTop: 14, padding: '12px 14px',
+            background: paperWarm, borderLeft: `2px solid ${accent}`,
+            fontFamily: "'Lora', serif", fontStyle: 'italic', fontSize: 14, color: ink.deep,
+            lineHeight: 1.55,
+          }}>
+            "{word.example}"
+          </div>
+        )}
+        {word.plantedAt && (
+          <div style={{
+            marginTop: 16, textAlign: 'center',
+            fontFamily: "'Caveat', cursive", fontSize: 14, color: ink.faint,
+          }}>
+            planted {daysSince(word.plantedAt)}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function daysSince(ts) {
+  const now = Date.now();
+  const days = Math.floor((now - ts) / 86400000);
+  if (days <= 0) return 'today';
+  if (days === 1) return 'yesterday';
+  if (days < 7) return `${days} days ago`;
+  if (days < 14) return 'a week ago';
+  if (days < 30) return `${Math.floor(days/7)} weeks ago`;
+  return `${Math.floor(days/30)} months ago`;
+}
+
+function EmptyGarden({ theme }) {
+  const ink = window.INK;
+  return (
+    <div style={{
+      padding: '60px 20px', textAlign: 'center',
+      border: `1.5px dashed ${theme.accent}`, borderRadius: 3,
+      background: theme.paperWarm, position: 'relative',
+    }}>
+      <window.StitchedCorners color={theme.accent} />
+      <div style={{ fontFamily: "'Caveat', cursive", fontSize: 22, color: ink.soft }}>
+        nothing planted yet
+      </div>
+      <div style={{
+        marginTop: 10, fontFamily: "'Lora', serif", fontSize: 14, fontStyle: 'italic',
+        color: ink.faint, maxWidth: 320, margin: '10px auto 0', lineHeight: 1.6,
+      }}>
+        Write an entry, then tap "plant in garden" on any word the coach surfaces.
+        Your garden grows as you do.
+      </div>
+    </div>
+  );
+}
+
+Object.assign(window, { GardenScreen });
+
+</script>
+<script type="text/babel">
+// Tweaks panel — toggled by host's edit-mode toolbar.
+
+function TweaksPanel({ config, setConfig, open, onClose }) {
+  if (!open) return null;
+  const ink = window.INK;
+  const [apiKey, setApiKey] = React.useState(
+    () => localStorage.getItem('thread:gemini_key') || ''
+  );
+  const [saved, setSaved] = React.useState(false);
+
+  const saveKey = () => {
+    localStorage.setItem('thread:gemini_key', apiKey.trim());
+    setSaved(true);
+    setTimeout(() => setSaved(false), 1800);
+  };
+
+  return (
+    <div style={{
+      position: 'fixed', bottom: 20, right: 20, width: 300,
+      background: '#F7F0E1', border: '1.5px dashed #A88858', borderRadius: 3,
+      padding: '18px 20px 20px', zIndex: 100,
+      boxShadow: '0 10px 30px rgba(61,46,38,0.18)',
+      fontFamily: "'Lora', serif",
+    }}>
+      <div style={{
+        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+        marginBottom: 14,
+      }}>
+        <div style={{ fontFamily: "'Caveat', cursive", fontSize: 22, color: '#A88858' }}>
+          Tweaks
+        </div>
+        <button onClick={onClose}
+          style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: ink.faint, fontSize: 16 }}>✕</button>
+      </div>
+
+      <TweakRow label="Gemini API key (free)">
+        <div style={{ display: 'flex', gap: 6 }}>
+          <input
+            type="password"
+            value={apiKey}
+            onChange={e => setApiKey(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && saveKey()}
+            placeholder="AIza..."
+            style={{
+              flex: 1, fontSize: 13, padding: '6px 8px',
+              background: '#F2E8D3', border: '1px solid #C9A97E',
+              borderRadius: 2, outline: 'none', color: '#3D2E26',
+            }}
+          />
+          <button onClick={saveKey}
+            style={{
+              fontFamily: "'Lora', serif", fontSize: 13, padding: '6px 10px',
+              background: saved ? '#6F8558' : '#A88858', color: '#F7F0E1',
+              border: 'none', borderRadius: 2, cursor: 'pointer',
+              transition: 'background 0.3s',
+            }}>
+            {saved ? '✓' : 'save'}
+          </button>
+        </div>
+        <div style={{ fontSize: 11, color: ink.faint, marginTop: 5, lineHeight: 1.4 }}>
+          Get a free key at aistudio.google.com
+        </div>
+      </TweakRow>
+
+      <TweakRow label="paper tone">
+        <OptionRow options={['cream','linen','bone']} value={config.palette}
+          onChange={v => setConfig({ ...config, palette: v })} />
+      </TweakRow>
+
+      <TweakRow label="accent thread">
+        <OptionRow options={['kraft','sage','rose']} value={config.accent}
+          onChange={v => setConfig({ ...config, accent: v })} />
+      </TweakRow>
+
+      <TweakRow label="display font">
+        <OptionRow options={['Caveat','Fraunces','Lora']} value={config.displayFont}
+          onChange={v => setConfig({ ...config, displayFont: v })} />
+      </TweakRow>
+    </div>
+  );
+}
+
+function TweakRow({ label, children }) {
+  return (
+    <div style={{ marginBottom: 12 }}>
+      <div style={{ fontFamily: "'Lora', serif", fontSize: 12, color: '#6B584C', marginBottom: 6, letterSpacing: '0.03em', textTransform: 'uppercase' }}>
+        {label}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function OptionRow({ options, value, onChange }) {
+  return (
+    <div style={{ display: 'flex', gap: 6 }}>
+      {options.map(o => {
+        const sel = o === value;
+        return (
+          <button key={o} onClick={() => onChange(o)}
+            style={{
+              flex: 1, fontFamily: "'Lora', serif", fontSize: 13,
+              padding: '6px 10px',
+              background: sel ? '#A88858' : 'transparent',
+              color: sel ? '#F7F0E1' : '#3D2E26',
+              border: `1px solid ${sel ? '#A88858' : '#C9A97E'}`,
+              borderRadius: 2, cursor: 'pointer',
+            }}>
+            {o}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+Object.assign(window, { TweaksPanel });
+
+</script>
+<script type="text/babel">
+// App shell: nav + screen routing + tweak state.
+
+const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
+  "palette": "cream",
+  "accent": "kraft",
+  "displayFont": "Caveat"
+}/*EDITMODE-END*/;
+
+function App() {
+  const [config, setConfig] = React.useState(TWEAK_DEFAULTS);
+  const [screen, setScreen] = React.useState('write');
+  const [tweaksOpen, setTweaksOpen] = React.useState(false);
+  const [readerEntry, setReaderEntry] = React.useState(null);
+
+  // Entries = seed + any saved local
+  const [entries] = React.useState(window.SEED_ENTRIES);
+  const [planted, setPlanted] = React.useState(() => {
+    try {
+      const stored = JSON.parse(localStorage.getItem('thread:planted') || 'null');
+      return stored || window.SEED_PLANTED;
+    } catch { return window.SEED_PLANTED; }
+  });
+
+  // Listen to storage for planted changes from Writer
+  React.useEffect(() => {
+    const interval = setInterval(() => {
+      try {
+        const stored = JSON.parse(localStorage.getItem('thread:planted') || 'null');
+        if (stored && stored.length !== planted.length) setPlanted(stored);
+      } catch {}
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [planted.length]);
+
+  // Seed planted into localStorage on first run so Writer picks them up
+  React.useEffect(() => {
+    if (!localStorage.getItem('thread:planted')) {
+      localStorage.setItem('thread:planted', JSON.stringify(window.SEED_PLANTED));
+    }
+  }, []);
+
+  // Edit-mode protocol
+  React.useEffect(() => {
+    const handler = (e) => {
+      if (!e.data) return;
+      if (e.data.type === '__activate_edit_mode') setTweaksOpen(true);
+      if (e.data.type === '__deactivate_edit_mode') setTweaksOpen(false);
+    };
+    window.addEventListener('message', handler);
+    window.parent.postMessage({ type: '__edit_mode_available' }, '*');
+    return () => window.removeEventListener('message', handler);
+  }, []);
+
+  // Persist tweaks
+  React.useEffect(() => {
+    window.parent.postMessage({ type: '__edit_mode_set_keys', edits: config }, '*');
+  }, [config]);
+
+  const pal = window.PALETTES[config.palette] || window.PALETTES.cream;
+  const acc = window.ACCENTS[config.accent] || window.ACCENTS.kraft;
+
+  const theme = {
+    paper: pal.paper,
+    paperAlt: pal.paperAlt,
+    paperWarm: pal.paperWarm,
+    accent: acc.light,
+    accentDeep: acc.deep,
+    displayFont: config.displayFont,
+  };
+
+  const ink = window.INK;
+
+  return (
+    <div style={{
+      minHeight: '100vh',
+      background: theme.paper, backgroundImage: window.PAPER_GRAIN,
+      fontFamily: "'Lora', Georgia, serif", color: ink.deep,
+      padding: '20px 16px 80px',
+    }}>
+      <Nav theme={theme} screen={screen} setScreen={setScreen} displayFont={config.displayFont} onSettings={() => setTweaksOpen(true)} />
+
+      <main style={{ maxWidth: 640, margin: '0 auto' }}>
+        {screen === 'write' && (
+          <window.Writer theme={theme} />
+        )}
+        {screen === 'calendar' && (
+          <window.CalendarScreen theme={theme} entries={entries}
+            onOpenEntry={setReaderEntry} />
+        )}
+        {screen === 'garden' && (
+          <window.GardenScreen theme={theme} planted={planted} />
+        )}
+      </main>
+
+      {readerEntry && <EntryReader entry={readerEntry} theme={theme} onClose={() => setReaderEntry(null)} />}
+
+      <window.TweaksPanel
+        config={config} setConfig={setConfig}
+        open={tweaksOpen} onClose={() => setTweaksOpen(false)}
+      />
+    </div>
+  );
+}
+
+function Nav({ theme, screen, setScreen, displayFont, onSettings }) {
+  const ink = window.INK;
+  const items = [
+    { id: 'write',    label: 'Write',    icon: window.PenIcon },
+    { id: 'calendar', label: 'Pages',    icon: window.CalendarIcon },
+    { id: 'garden',   label: 'Garden',   icon: window.GardenIcon },
+  ];
+  const hasKey = !!localStorage.getItem('thread:gemini_key');
+  return (
+    <nav style={{
+      maxWidth: 720, margin: '0 auto 28px',
+      display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+      paddingBottom: 14,
+    }}>
+      <div style={{
+        fontFamily: `'${displayFont}', 'Caveat', cursive`,
+        fontSize: 26, color: ink.deep, letterSpacing: '0.01em',
+        fontWeight: displayFont === 'Lora' || displayFont === 'Fraunces' ? 500 : 400,
+      }}>
+        Thread
+      </div>
+      <div style={{ display: 'flex', gap: 18, alignItems: 'center' }}>
+        {items.map(it => {
+          const active = screen === it.id;
+          const Icon = it.icon;
+          return (
+            <button key={it.id} onClick={() => setScreen(it.id)}
+              style={{
+                background: 'transparent', border: 'none', cursor: 'pointer',
+                padding: '4px 2px', display: 'flex', flexDirection: 'column',
+                alignItems: 'center', gap: 2,
+              }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <Icon size={16} color={active ? ink.deep : ink.soft} />
+                <span style={{
+                  fontFamily: "'Lora', serif",
+                  fontSize: 14,
+                  color: active ? ink.deep : ink.soft,
+                  fontWeight: active ? 500 : 400,
+                  letterSpacing: '0.02em',
+                }}>
+                  {it.label}
+                </span>
+              </div>
+              {active
+                ? <window.StitchUnderline color={theme.accentDeep} width={44} />
+                : <div style={{ height: 4, marginTop: 4 }} />
+              }
+            </button>
+          );
+        })}
+        <button onClick={onSettings} title="Settings"
+          style={{
+            background: 'transparent', border: 'none', cursor: 'pointer',
+            padding: '4px 2px', display: 'flex', flexDirection: 'column',
+            alignItems: 'center', gap: 2, position: 'relative',
+          }}>
+          <window.SettingsIcon size={16} color={ink.soft} />
+          {!hasKey && (
+            <div style={{
+              position: 'absolute', top: 0, right: 0,
+              width: 6, height: 6, borderRadius: '50%',
+              background: '#B57E72',
+            }} />
+          )}
+        </button>
+      </div>
+    </nav>
+  );
+}
+
+function EntryReader({ entry, theme, onClose }) {
+  const ink = window.INK;
+  return (
+    <div onClick={onClose}
+      style={{
+        position: 'fixed', inset: 0, background: 'rgba(61,46,38,0.3)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        padding: 24, zIndex: 40, animation: 'fadeIn 0.2s ease-out',
+      }}>
+      <div onClick={e => e.stopPropagation()}
+        style={{
+          background: theme.paper, border: `1.5px dashed ${theme.accent}`, borderRadius: 3,
+          padding: '32px 32px 28px', maxWidth: 520, width: '100%',
+          maxHeight: '85vh', overflow: 'auto', position: 'relative',
+          boxShadow: '0 10px 40px rgba(61,46,38,0.2)',
+          animation: 'fadeInUp 0.3s ease-out',
+        }}>
+        <window.StitchedCorners color={theme.accent} />
+        <button onClick={onClose}
+          style={{
+            position: 'absolute', top: 14, right: 18,
+            background: 'transparent', border: 'none', cursor: 'pointer',
+            color: ink.faint, fontSize: 18,
+          }}>✕</button>
+        <div style={{ textAlign: 'center', marginBottom: 6 }}>
+          <div style={{ fontFamily: "'Caveat', cursive", fontSize: 22, color: ink.soft }}>
+            {window.formatDate(entry.date)}
+          </div>
+        </div>
+        <div style={{ marginBottom: 18 }}>
+          <window.HandDivider color={theme.accent} width={80} />
+        </div>
+        <div style={{
+          fontFamily: "'Lora', serif", fontSize: 16.5, lineHeight: 1.8,
+          color: ink.deep, whiteSpace: 'pre-wrap',
+        }}>
+          {entry.excerpt}
+        </div>
+        <div style={{ marginTop: 22, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            <div style={{ width: 10, height: 10, borderRadius: '50%', background: window.MOOD_COLORS[entry.mood] }}/>
+            <span style={{ fontFamily: "'Caveat', cursive", fontSize: 16, color: ink.soft }}>{entry.mood}</span>
+          </div>
+          <span style={{ color: theme.accent }}>·</span>
+          <span style={{ fontFamily: "'Caveat', cursive", fontSize: 14, color: ink.faint }}>
+            level {entry.level}
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(<App />);
+
+</script>
+
+</body>
+</html>
