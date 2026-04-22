@@ -31,7 +31,7 @@
   // Pre-fill API key from ?key= URL param (useful for investor demos)
   (function() {
     const p = new URLSearchParams(location.search).get('key');
-    if (p) { localStorage.setItem('thread:gemini_key', p); }
+    if (p) { localStorage.setItem('thread:groq_key', p); }
   })();
 </script>
 
@@ -422,7 +422,7 @@ Object.assign(window, { SEED_ENTRIES, SEED_PLANTED, mockFeedback });
 
 </script>
 <script type="text/babel">
-// Coach: wraps window.claude.complete with a mock fallback.
+// Coach: Groq (Llama 3.3 70B) with mock fallback.
 
 const COACH_PROMPT = `You are a warm, adaptive English-writing coach for a personal journal. A learner has written a diary entry. Respond with a brief encouragement, then provide corrections adapted to their apparent level.
 
@@ -444,31 +444,32 @@ Respond with ONLY this JSON (no markdown, no prose):
   "detected_level": "A2|B1|B2|C1"
 }`;
 
-async function geminiComplete(prompt) {
-  const key = localStorage.getItem('thread:gemini_key') || '';
+async function groqComplete(prompt) {
+  const key = localStorage.getItem('thread:groq_key') || '';
   if (!key) return null;
   if (location.protocol === 'file:') {
     throw new Error('FILE_PROTOCOL');
   }
-  const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${key}`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
-    }
-  );
+  const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
+    body: JSON.stringify({
+      model: 'llama-3.3-70b-versatile',
+      max_tokens: 1600,
+      messages: [{ role: 'user', content: prompt }],
+    }),
+  });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err?.error?.message || `HTTP ${res.status}`);
   }
   const data = await res.json();
-  return data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+  return data.choices?.[0]?.message?.content || '';
 }
 
 async function runCoach(entry) {
   try {
-    const text = await geminiComplete(
+    const text = await groqComplete(
       `${COACH_PROMPT}\n\n---\n\nDiary entry:\n${entry}\n\n---\n\nReturn only the JSON object.`
     );
     if (!text) {
@@ -476,7 +477,7 @@ async function runCoach(entry) {
       return { ...window.mockFeedback(entry), _source: 'mock' };
     }
     const cleaned = String(text).replace(/^```json\s*/i, '').replace(/```\s*$/i, '').trim();
-    return { ...JSON.parse(cleaned), _source: 'gemini' };
+    return { ...JSON.parse(cleaned), _source: 'groq' };
   } catch (e) {
     console.warn('coach failed:', e.message);
     const isCorsError = e.message === 'FILE_PROTOCOL' || e.message.includes('fetch');
@@ -486,7 +487,7 @@ async function runCoach(entry) {
 
 async function runPhraseGatherer(title) {
   try {
-    const text = await geminiComplete(
+    const text = await groqComplete(
       `Given the work "${title}", generate 7 signature phrases, vocabulary items, or idioms that capture its register, era, and tone. Prioritize phrases a learner could use in their own diary. Avoid proper nouns specific to the plot.\nReturn ONLY valid JSON: { "phrases": [{ "phrase": "...", "context": "brief note" }] }`
     );
     if (!text) {
@@ -932,10 +933,10 @@ function FeedbackView({ theme, entry, mood, feedback, planted, onPlant, onNew })
               Запустите <code style={{ background: '#F2E8D3', padding: '1px 4px', borderRadius: 2 }}>start_thread.bat</code>{' '}
               из папки Downloads, чтобы открыть через локальный сервер.
             </>
-          ) : !localStorage.getItem('thread:gemini_key') ? (
-            <>Ключ не введён — показан демо-анализ. Нажмите ⚙️ и добавьте Gemini API key.</>
+          ) : !localStorage.getItem('thread:groq_key') ? (
+            <>Ключ не введён — показан демо-анализ. Нажмите ⚙️ и добавьте Groq API key.</>
           ) : (
-            <>Gemini не ответил ({feedback._error}) — показан демо-анализ.</>
+            <>Groq не ответил ({feedback._error}) — показан демо-анализ.</>
           )}
         </div>
       )}
@@ -1577,12 +1578,12 @@ function TweaksPanel({ config, setConfig, open, onClose }) {
   if (!open) return null;
   const ink = window.INK;
   const [apiKey, setApiKey] = React.useState(
-    () => localStorage.getItem('thread:gemini_key') || ''
+    () => localStorage.getItem('thread:groq_key') || ''
   );
   const [saved, setSaved] = React.useState(false);
 
   const saveKey = () => {
-    localStorage.setItem('thread:gemini_key', apiKey.trim());
+    localStorage.setItem('thread:groq_key', apiKey.trim());
     setSaved(true);
     setTimeout(() => setSaved(false), 1800);
   };
@@ -1606,14 +1607,14 @@ function TweaksPanel({ config, setConfig, open, onClose }) {
           style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: ink.faint, fontSize: 16 }}>✕</button>
       </div>
 
-      <TweakRow label="Gemini API key (free)">
+      <TweakRow label="Groq API key (free)">
         <div style={{ display: 'flex', gap: 6 }}>
           <input
             type="password"
             value={apiKey}
             onChange={e => setApiKey(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && saveKey()}
-            placeholder="AIza..."
+            placeholder="gsk_..."
             style={{
               flex: 1, fontSize: 13, padding: '6px 8px',
               background: '#F2E8D3', border: '1px solid #C9A97E',
@@ -1631,7 +1632,7 @@ function TweaksPanel({ config, setConfig, open, onClose }) {
           </button>
         </div>
         <div style={{ fontSize: 11, color: ink.faint, marginTop: 5, lineHeight: 1.4 }}>
-          Get a free key at aistudio.google.com
+          Get a free key at groq.com
         </div>
       </TweakRow>
 
@@ -1802,7 +1803,7 @@ function Nav({ theme, screen, setScreen, displayFont, onSettings }) {
     { id: 'calendar', label: 'Pages',    icon: window.CalendarIcon },
     { id: 'garden',   label: 'Garden',   icon: window.GardenIcon },
   ];
-  const hasKey = !!localStorage.getItem('thread:gemini_key');
+  const hasKey = !!localStorage.getItem('thread:groq_key');
   return (
     <nav style={{
       maxWidth: 720, margin: '0 auto 28px',
