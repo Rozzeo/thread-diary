@@ -690,9 +690,22 @@ function Writer({ theme, onOpenEntry }) {
     setLoading(true);
     try {
       const parsed = await window.runCoach(entry);
+      const finalMood = mood || parsed.detected_mood || 'calm';
       setFeedback(parsed);
       setSavedEntry(entry);
       if (!mood && parsed.detected_mood) setMood(parsed.detected_mood);
+
+      // Persist entry to localStorage
+      const newEntry = {
+        date: Date.now(),
+        mood: finalMood,
+        level: parsed.detected_level || 'B1',
+        excerpt: entry.trim().slice(0, 300),
+      };
+      const todayKey = window.dateKey(new Date());
+      const existing = JSON.parse(localStorage.getItem('thread:entries') || '[]');
+      const filtered = existing.filter(e => window.dateKey(new Date(e.date)) !== todayKey);
+      localStorage.setItem('thread:entries', JSON.stringify([newEntry, ...filtered]));
     } finally {
       setLoading(false);
     }
@@ -1706,8 +1719,17 @@ function App() {
   const [tweaksOpen, setTweaksOpen] = React.useState(false);
   const [readerEntry, setReaderEntry] = React.useState(null);
 
-  // Entries = seed + any saved local
-  const [entries] = React.useState(window.SEED_ENTRIES);
+  // Entries = real saved + seed (seed fills days with no real entry)
+  const loadEntries = () => {
+    try {
+      const stored = JSON.parse(localStorage.getItem('thread:entries') || '[]');
+      const real = stored.map(e => ({ ...e, date: new Date(e.date) }));
+      const realKeys = new Set(real.map(e => window.dateKey(e.date)));
+      const seeds = window.SEED_ENTRIES.filter(e => !realKeys.has(window.dateKey(e.date)));
+      return [...real, ...seeds];
+    } catch { return window.SEED_ENTRIES; }
+  };
+  const [entries, setEntries] = React.useState(loadEntries);
   const [planted, setPlanted] = React.useState(() => {
     try {
       const stored = JSON.parse(localStorage.getItem('thread:planted') || 'null');
@@ -1715,7 +1737,19 @@ function App() {
     } catch { return window.SEED_PLANTED; }
   });
 
-  // Listen to storage for planted changes from Writer
+  // Listen to storage for entries + planted changes from Writer
+  React.useEffect(() => {
+    const interval = setInterval(() => {
+      try {
+        const stored = JSON.parse(localStorage.getItem('thread:entries') || '[]');
+        if (stored.length !== entries.filter(e => !window.SEED_ENTRIES.includes(e)).length) {
+          setEntries(loadEntries());
+        }
+      } catch {}
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [entries]);
+
   React.useEffect(() => {
     const interval = setInterval(() => {
       try {
